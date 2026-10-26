@@ -1,0 +1,40 @@
+[project]
+name = "burnscope"
+version = "0.1.0"
+description = "Find where your AI agent burns money, and how to fix it."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Janith Yogesh Rathuge" }]
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+burnscope = "burnscope.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
