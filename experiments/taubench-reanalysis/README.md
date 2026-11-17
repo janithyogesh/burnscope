@@ -109,6 +109,12 @@ used. All three prices are verified; see `pricing.yaml`.
    say whether caching happened. With caching, real costs could be lower.
 2. **The GPT-4o snapshot is unknown.** The 2024-05-13 price is the main assumption;
    2024-08-06 (half the input price) is reported alongside it.
+   Note on timing: these exact GPT-4o results (0.420 airline, 0.604 retail) were added
+   to tau-bench's README in commits `888a1e8` (2024-10-07 23:44 UTC) and `a67141c`
+   (2024-10-08 02:22 UTC). That is five days after OpenAI pointed the `gpt-4o` alias
+   at `gpt-4o-2024-08-06` on 2024-10-02. This makes the cheaper 2024-08-06 snapshot
+   (`cost_usd_alt`) somewhat more likely, but the run dates are not recorded, so both
+   columns stay.
 3. **Every call sends the system prompt, all earlier messages and the tool definitions**,
    as tau-bench's `tool_calling_agent.py` does. The GPT-4o transcripts match that code's
    format. The Claude transcripts do not (see limitations), so for Claude this is an
