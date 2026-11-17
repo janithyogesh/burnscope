@@ -29,7 +29,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "experiments"]
+exclude = ["experiments/[^/]+/data/"]   # downloaded third-party code, not ours
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
@@ -42,3 +43,9 @@ dev = [
     "ruff>=0.17.2",
     "types-pyyaml>=6.0.12.20261030",
 ]
+experiments = [
+    "tiktoken>=0.14.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "experiments"]

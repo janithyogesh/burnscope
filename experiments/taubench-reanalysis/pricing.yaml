@@ -1,0 +1,31 @@
+# Prices for the tau-bench re-analysis, in US dollars per million tokens.
+# Standard (non-batch) API prices in effect when the runs were made (late 2024).
+# These model versions are no longer on the live pricing pages, so each source
+# is an archived copy of the official page (Wayback Machine).
+currency: USD
+providers:
+  anthropic:
+    models:
+      claude-3-5-sonnet-20241022:
+        input: 3.00
+        output: 15.00
+        source: https://web.archive.org/web/20241113202656/https://docs.anthropic.com/en/docs/about-claude/models
+        checked: 2026-11-17
+        verified: true
+  openai:
+    models:
+      # Main assumption: the runs come from the 2024 tau-bench paper.
+      gpt-4o-2024-05-13:
+        input: 5.00
+        output: 15.00
+        source: https://web.archive.org/web/20241115053932/https://openai.com/api/pricing/
+        checked: 2026-11-17
+        verified: true
+      # Sensitivity check: the later, cheaper GPT-4o snapshot.
+      gpt-4o-2024-08-06:
+        input: 2.50
+        cached_input: 1.25
+        output: 10.00
+        source: https://web.archive.org/web/20241115053932/https://openai.com/api/pricing/
+        checked: 2026-11-17
+        verified: true

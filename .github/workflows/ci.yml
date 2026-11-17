@@ -33,7 +33,7 @@ jobs:
 
       # --locked fails if uv.lock is out of date with pyproject.toml.
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --all-groups
 
       - name: Lint
         run: uv run ruff check
