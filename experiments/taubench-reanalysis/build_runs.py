@@ -12,6 +12,7 @@ import statistics
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import tiktoken
 
@@ -92,8 +93,17 @@ COLUMNS = [
     "output_tokens",
     "cost_usd_main",
     "cost_usd_alt",
+    "cost_usd_uniform",
     "user_cost_usd",
 ]
+
+
+def uniform(fmt: ChatFormat) -> ChatFormat:
+    """The same format, but with the tool list counted as JSON text.
+
+    Used for cost_usd_uniform, so both models' tool lists are counted the same way.
+    """
+    return replace(fmt, tool_schema_style="json")
 
 
 def o200k_counter() -> TokenCounter:
@@ -102,15 +112,27 @@ def o200k_counter() -> TokenCounter:
     return lambda text: len(encoding.encode_ordinary(text))
 
 
+def run_usage(
+    run: TauRun, tools: list[dict[str, Any]], count: TokenCounter, fmt: ChatFormat
+) -> TokenUsage:
+    """Total estimated agent tokens over every call in one run."""
+    calls = call_usages(run.messages, tools, count, fmt)
+    return TokenUsage(
+        uncached_input=sum(call.uncached_input for call in calls),
+        output=sum(call.output for call in calls),
+    )
+
+
 def run_row(
     run: TauRun,
     setup: ModelSetup,
     domain: str,
     usage: TokenUsage,
+    uniform_usage: TokenUsage,
     main: ModelPrice,
     alt: ModelPrice | None,
 ) -> dict[str, object]:
-    """One CSV row for one run."""
+    """One CSV row for one run. Token columns use the main counting method."""
     user_cost = run.user_cost if setup.user_cost_is_dollars else None
     return {
         "model": setup.name,
@@ -124,6 +146,7 @@ def run_row(
         "output_tokens": usage.output,
         "cost_usd_main": f"{cost_of(usage, main).total:.8f}",
         "cost_usd_alt": "" if alt is None else f"{cost_of(usage, alt).total:.8f}",
+        "cost_usd_uniform": f"{cost_of(uniform_usage, main).total:.8f}",
         "user_cost_usd": "" if user_cost is None else f"{user_cost:.8f}",
     }
 
@@ -140,16 +163,17 @@ def build() -> list[dict[str, object]]:
         alt = None if setup.alt_price is None else pricing.price_for(*setup.alt_price)
         for domain in DOMAINS:
             tools = load_tools(TAU_BENCH / "tau_bench" / "envs" / domain / "tools")
-            tool_tokens = tool_definition_tokens(tools, count, setup.fmt)
-            print(f"{setup.name} {domain}: {len(tools)} tools = {tool_tokens} tokens per call")
+            main_tokens = tool_definition_tokens(tools, count, setup.fmt)
+            uniform_tokens = tool_definition_tokens(tools, count, uniform(setup.fmt))
+            print(
+                f"{setup.name} {domain}: {len(tools)} tools = {main_tokens} tokens per call "
+                f"(uniform: {uniform_tokens})"
+            )
             path = TAU_BENCH / "historical_trajectories" / f"{setup.file_prefix}-{domain}.json"
             for run in load_runs(path):
-                calls = call_usages(run.messages, tools, count, setup.fmt)
-                usage = TokenUsage(
-                    uncached_input=sum(call.uncached_input for call in calls),
-                    output=sum(call.output for call in calls),
-                )
-                rows.append(run_row(run, setup, domain, usage, main, alt))
+                usage = run_usage(run, tools, count, setup.fmt)
+                uniform_usage = run_usage(run, tools, count, uniform(setup.fmt))
+                rows.append(run_row(run, setup, domain, usage, uniform_usage, main, alt))
     return rows
 
 
@@ -169,7 +193,8 @@ def sanity_checks(rows: list[dict[str, object]]) -> bool:
     all_ok &= len(rows) == 1980
     header = (
         f"{'model':<28}{'domain':<9}{'runs':>5}{'tasks':>6}{'trials':>7}"
-        f"{'success':>9}{'paper':>7}{'calls p50':>10}{'max':>5}{'cost p50 $':>12}  check"
+        f"{'success':>9}{'paper':>7}{'calls p50':>10}{'max':>5}{'cost p50 $':>12}"
+        f"{'uniform p50 $':>15}  check"
     )
     print(header)
     print("-" * len(header))
@@ -181,6 +206,7 @@ def sanity_checks(rows: list[dict[str, object]]) -> bool:
             success = statistics.mean(int(str(r["success"])) for r in group)
             calls = [int(str(r["n_agent_calls"])) for r in group]
             cost = statistics.median(float(str(r["cost_usd_main"])) for r in group)
+            uniform_cost = statistics.median(float(str(r["cost_usd_uniform"])) for r in group)
             published = PUBLISHED_SUCCESS[(setup.name, domain)]
             ok = (
                 len(tasks) == EXPECTED_TASKS[domain]
@@ -192,7 +218,7 @@ def sanity_checks(rows: list[dict[str, object]]) -> bool:
             print(
                 f"{setup.name:<28}{domain:<9}{len(group):>5}{len(tasks):>6}{len(trials):>7}"
                 f"{success:>9.3f}{published:>7.2f}{statistics.median(calls):>10.0f}"
-                f"{max(calls):>5}{cost:>12.4f}  {'OK' if ok else 'MISMATCH'}"
+                f"{max(calls):>5}{cost:>12.4f}{uniform_cost:>15.4f}  {'OK' if ok else 'MISMATCH'}"
             )
     print(f"\nAll sanity checks passed: {all_ok}")
     return all_ok

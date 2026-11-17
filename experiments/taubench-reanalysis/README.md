@@ -38,9 +38,10 @@ One row per run.
 | `success` | 1 if reward = 1.0, else 0 |
 | `n_agent_calls` | Model calls by the agent (one per assistant message) |
 | `n_tool_calls` | Tool calls by the agent |
-| `input_tokens`, `output_tokens` | Estimated agent tokens, summed over all calls in the run |
-| `cost_usd_main` | Agent cost at the main price assumption |
-| `cost_usd_alt` | GPT-4o only: cost at the alternative snapshot's price |
+| `input_tokens`, `output_tokens` | Estimated agent tokens, summed over all calls in the run (main counting method) |
+| `cost_usd_main` | **Primary.** Agent cost at the main price, with each model's tool list counted the way its provider documents |
+| `cost_usd_alt` | GPT-4o only: same tokens as `cost_usd_main`, at the alternative snapshot's price |
+| `cost_usd_uniform` | Agent cost at the main price, with **both** models' tool lists counted the same way (JSON text). Use it to compare models |
 | `user_cost_usd` | Simulated customer's cost as recorded by tau-bench. GPT-4o only (see below) |
 
 ## Method
@@ -69,6 +70,27 @@ the files), `src/burnscope/pricing.py` (prices and cost).
 
 Resulting tool definition tokens per call: GPT-4o 1,120 (airline) and 1,875 (retail);
 Claude 2,437 (airline) and 2,854 (retail), plus the 346-token hidden prompt.
+
+### Two ways of counting the tool list
+
+The tool definitions are sent with every call, so how they are counted shifts every run's
+cost. The study reports two versions:
+
+| Column | GPT-4o tool list | Claude tool list |
+|---|---|---|
+| `cost_usd_main` | OpenAI cookbook formula (1,120 / 1,875 tokens) | JSON text (2,437 / 2,854 tokens) |
+| `cost_usd_uniform` | JSON text (2,437 / 2,854 tokens) | JSON text (2,437 / 2,854 tokens) |
+
+- `cost_usd_main` follows each provider's own documentation, so it is the best estimate
+  of each model's real cost. Use it for questions **within one model**, such as how cost
+  varies across repeats of a task.
+- `cost_usd_uniform` counts the tool list identically for both models, so a difference
+  between models cannot come from the counting method. For Claude it equals
+  `cost_usd_main`; only GPT-4o changes. Use it, alongside `cost_usd_main` and
+  `cost_usd_alt`, for questions **between models**.
+
+Everything else is the same in both columns, including Claude's 346-token hidden tool
+prompt, which is a documented real cost rather than a counting choice.
 
 ### Prices (US $ per million tokens, standard API, late 2024)
 
@@ -106,7 +128,9 @@ used. All three prices are verified; see `pricing.yaml`.
 
    Within-model comparisons (same task across trials) are barely affected, because
    every call of a model gets the same fixed amount. **Cross-model comparisons are
-   sensitive to this.**
+   sensitive to this**, which is why `cost_usd_uniform` exists: findings that compare
+   models should hold under `cost_usd_main`, `cost_usd_alt` and `cost_usd_uniform`
+   before being treated as solid.
 2. **Claude's tokenizer is not public.** `o200k_base` is exact for GPT-4o text and only a
    proxy for Claude.
 3. **Per-message overhead for Claude** uses OpenAI's published values as a proxy;
@@ -130,13 +154,13 @@ used. All three prices are verified; see `pricing.yaml`.
 Output of `build_runs.py` (all checks pass):
 
 ```
-model                       domain    runs tasks trials  success  paper calls p50  max  cost p50 $  check
----------------------------------------------------------------------------------------------------------
-gpt-4o                      airline    200    50      4    0.420   0.42        11   30      0.2104  OK
-gpt-4o                      retail     460   115      4    0.604   0.60        13   30      0.2858  OK
-claude-3-5-sonnet-20241022  airline    400    50      8    0.460   0.46        12   30      0.2148  OK
-claude-3-5-sonnet-20241022  retail     920   115      8    0.692   0.69        13   30      0.2544  OK
+model                       domain    runs tasks trials  success  paper calls p50  max  cost p50 $  uniform p50 $  check
+------------------------------------------------------------------------------------------------------------------------
+gpt-4o                      airline    200    50      4    0.420   0.42        11   30      0.2104         0.2893  OK
+gpt-4o                      retail     460   115      4    0.604   0.60        13   30      0.2858         0.3509  OK
+claude-3-5-sonnet-20241022  airline    400    50      8    0.460   0.46        12   30      0.2148         0.2148  OK
+claude-3-5-sonnet-20241022  retail     920   115      8    0.692   0.69        13   30      0.2544         0.2544  OK
 ```
 
-`paper` is the published success rate; `cost p50 $` is the median agent cost per run at
-the main price.
+`paper` is the published success rate. `cost p50 $` and `uniform p50 $` are the median
+agent cost per run from `cost_usd_main` and `cost_usd_uniform`.
