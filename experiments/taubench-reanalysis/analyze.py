@@ -163,6 +163,44 @@ def spreads(runs: Sequence[Run]) -> list[Spread]:
     return results
 
 
+def success_ratio(group: Sequence[Run]) -> float | None:
+    """Max/min cost among a task's successful runs; None if fewer than 2 succeeded."""
+    costs = [r.costs["main"] for r in group if r.success]
+    return max_min_ratio(costs) if len(costs) >= 2 else None
+
+
+@dataclass(frozen=True)
+class SuccessSpread:
+    view: View
+    domain: str
+    tasks: int  # tasks with at least 2 successful runs
+    all_tasks: int
+    ratio_p50: float
+    ratio_p90: float
+    ratio_max: float
+
+
+def success_spreads(runs: Sequence[Run]) -> list[SuccessSpread]:
+    """Run-to-run spread using successful runs only, on 4 trials per task."""
+    results = []
+    for view in (GPT_VIEW, CLAUDE_MATCHED):
+        for domain in DOMAINS:
+            tasks = by_task(runs, view, domain)
+            ratios = [r for g in tasks.values() if (r := success_ratio(g)) is not None]
+            results.append(
+                SuccessSpread(
+                    view,
+                    domain,
+                    len(ratios),
+                    len(tasks),
+                    percentile(ratios, 0.5),
+                    percentile(ratios, 0.9),
+                    max(ratios),
+                )
+            )
+    return results
+
+
 # --- question 2: cost of failure -------------------------------------------------
 
 
@@ -348,6 +386,23 @@ def spread_table(results: Sequence[Spread]) -> str:
                 f"{s.ratio_p50:.2f}x",
                 f"{s.ratio_p90:.2f}x",
                 f"{s.ratio_worst:.1f}x",
+            ]
+            for s in results
+        ],
+    )
+
+
+def success_spread_table(results: Sequence[SuccessSpread]) -> str:
+    return table(
+        ["view", "domain", "tasks with 2+ successes", "max/min p50", "max/min p90", "max/min max"],
+        [
+            [
+                s.view.label,
+                s.domain,
+                f"{s.tasks} of {s.all_tasks}",
+                f"{s.ratio_p50:.2f}x",
+                f"{s.ratio_p90:.2f}x",
+                f"{s.ratio_max:.1f}x",
             ]
             for s in results
         ],
@@ -577,21 +632,26 @@ def dollars(value: float, _position: object = None) -> str:
 
 
 def highlight_widest_task(ax: Axes, groups: Sequence[Sequence[Run]]) -> None:
-    """Mark the task whose costliest run is the most times its cheapest run."""
-    ratios = [max_min_ratio([r.costs["main"] for r in group]) for group in groups]
+    """Mark the task whose costliest successful run is the most times its cheapest one.
+
+    Only successful runs count, so the example can't be a run that was cheap
+    because it gave up early.
+    """
+    ratios = [success_ratio(group) or 0.0 for group in groups]
     x = max(range(len(groups)), key=ratios.__getitem__)
-    costs = [r.costs["main"] for r in groups[x]]
+    costs = [r.costs["main"] for r in groups[x] if r.success]
     low, high = min(costs), max(costs)
     ax.vlines(x, low, high, color="#444444", lw=0.8, ls="--", zorder=0)
     # Put the label on the emptier side: upper left if the task is on the right.
     on_right = x > len(groups) / 2
     ax.annotate(
-        f"Same task: {ratios[x]:.1f}x between\ncheapest and costliest run",
+        f"Same task, both runs succeeded:\n{ratios[x]:.1f}x apart",
         xy=(x, (low * high) ** 0.5),  # middle of the line on a log scale
         xytext=(0.04, 0.95) if on_right else (0.96, 0.05),
         textcoords="axes fraction",
         ha="left" if on_right else "right",
         va="top" if on_right else "bottom",
+        multialignment="left",
         fontsize=10,
         bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#999999"},
         arrowprops={"arrowstyle": "->", "color": "#444444", "lw": 1},
@@ -686,6 +746,7 @@ def robustness_lines(paired: Sequence[PairedResult]) -> list[str]:
 
 def summary(
     spread: Sequence[Spread],
+    success_spread: Sequence[SuccessSpread],
     failure: Sequence[Failure],
     per_model: Sequence[CpsResult],
     paired: Sequence[PairedResult],
@@ -748,6 +809,12 @@ trials there are more chances to draw an extreme run, so max/min grows by constr
   for the 10% most variable tasks.
 - The most extreme task: **{worst.ratio_worst:.1f}x** ({worst.view.label}, {worst.domain}).
 {domain_line}
+
+**Successful runs only** (4 trials per task, tasks with at least 2 successful runs). A
+failed run can be cheap simply because the agent gave up early, so this checks that cost
+still varies when the agent completes the same task correctly.
+
+{success_spread_table(success_spread)}
 
 ![Fig 1](fig1.png)
 
@@ -820,7 +887,7 @@ def main() -> None:
     fig_cps(per_model, OUT_DIR / "fig2.png")
     fig_flip(flips, OUT_DIR / "fig3.png")
     fig_blog(runs, OUT_DIR / "blog_fig1.png")
-    text = summary(spread, failure, per_model, paired, flips)
+    text = summary(spread, success_spreads(runs), failure, per_model, paired, flips)
     (OUT_DIR / "summary.md").write_text(text, encoding="utf-8")
     print(text)
 

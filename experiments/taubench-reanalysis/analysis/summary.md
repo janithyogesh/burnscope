@@ -46,6 +46,17 @@ trials there are more chances to draw an extreme run, so max/min grows by constr
 - The most extreme task: **15.5x** (Claude (8 trials), airline).
 - Airline costs vary more than retail for every view (higher median CV).
 
+**Successful runs only** (4 trials per task, tasks with at least 2 successful runs). A
+failed run can be cheap simply because the agent gave up early, so this checks that cost
+still varies when the agent completes the same task correctly.
+
+| view | domain | tasks with 2+ successes | max/min p50 | max/min p90 | max/min max |
+|---|---|---|---|---|---|
+| GPT-4o (4 trials) | airline | 24 of 50 | 1.42x | 2.14x | 3.8x |
+| GPT-4o (4 trials) | retail | 75 of 115 | 1.24x | 1.66x | 3.5x |
+| Claude (first 4 trials) | airline | 26 of 50 | 1.40x | 2.79x | 5.5x |
+| Claude (first 4 trials) | retail | 88 of 115 | 1.22x | 1.65x | 3.8x |
+
 ![Fig 1](fig1.png)
 
 ## 2. Do failed runs cost more than successful ones?
