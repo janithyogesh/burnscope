@@ -1,6 +1,30 @@
 """Shared data types used across burnscope."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, NonNegativeInt
+
+
+class ToolCall(BaseModel):
+    """A request from the model to run one tool."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    arguments: str
+    """The tool's arguments as JSON text, exactly as the model wrote them."""
+
+
+class ChatMessage(BaseModel):
+    """One message in a chat-style conversation with a model."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    name: str | None = None
+    """For tool messages: the name of the tool that produced this result."""
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class TokenUsage(BaseModel):
