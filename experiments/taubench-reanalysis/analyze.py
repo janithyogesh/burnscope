@@ -20,8 +20,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter
 
 from burnscope.analysis.stats import bootstrap_ci, cost_per_success, cv, max_min_ratio, percentile
 
@@ -560,6 +562,109 @@ def fig_flip(results: Sequence[FlipResult], path: Path) -> None:
     fig.savefig(path, dpi=DPI)
 
 
+BLOG_SOURCE_NOTE = (
+    "Data: tau-bench published runs (Sierra Research). Agent cost estimated from transcripts "
+    "at late-2024 list prices.\ngithub.com/janithyogesh/burnscope"
+)
+BLOG_DOLLAR_TICKS = [0.025, 0.05, 0.10, 0.25, 0.50, 1.00]
+BLOG_SUCCESS = {"color": "#1f77b4", "marker": "o", "label": "Successful run"}
+BLOG_FAILED = {"color": "#e8710a", "marker": "^", "label": "Failed run"}
+
+
+def dollars(value: float, _position: object = None) -> str:
+    """Tick label like $0.05, keeping a third decimal only when needed ($0.025)."""
+    return f"${value:.3f}" if round(value, 2) != round(value, 3) else f"${value:.2f}"
+
+
+def highlight_widest_task(ax: Axes, groups: Sequence[Sequence[Run]]) -> None:
+    """Mark the task whose costliest run is the most times its cheapest run."""
+    ratios = [max_min_ratio([r.costs["main"] for r in group]) for group in groups]
+    x = max(range(len(groups)), key=ratios.__getitem__)
+    costs = [r.costs["main"] for r in groups[x]]
+    low, high = min(costs), max(costs)
+    ax.vlines(x, low, high, color="#444444", lw=0.8, ls="--", zorder=0)
+    # Put the label on the emptier side: upper left if the task is on the right.
+    on_right = x > len(groups) / 2
+    ax.annotate(
+        f"Same task: {ratios[x]:.1f}x between\ncheapest and costliest run",
+        xy=(x, (low * high) ** 0.5),  # middle of the line on a log scale
+        xytext=(0.04, 0.95) if on_right else (0.96, 0.05),
+        textcoords="axes fraction",
+        ha="left" if on_right else "right",
+        va="top" if on_right else "bottom",
+        fontsize=10,
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#999999"},
+        arrowprops={"arrowstyle": "->", "color": "#444444", "lw": 1},
+    )
+
+
+def fig_blog(runs: Sequence[Run], path: Path) -> None:
+    """Simplified airline version of fig 1 for a general audience (1600 x 900 px)."""
+    fig = Figure(figsize=(8, 4.5), layout="constrained", facecolor="white")
+    axes = fig.subplots(1, 2, sharey=True)
+    panels = ((GPT_VIEW, "GPT-4o"), (CLAUDE_MATCHED, "Claude 3.5 Sonnet"))
+    for ax, (view, title) in zip(axes, panels, strict=True):
+        groups = sorted(
+            by_task(runs, view, "airline").values(),
+            key=lambda g: statistics.median(r.costs["main"] for r in g),
+        )
+        for style, success in ((BLOG_SUCCESS, True), (BLOG_FAILED, False)):
+            points = [
+                (x, r.costs["main"])
+                for x, g in enumerate(groups)
+                for r in g
+                if r.success == success
+            ]
+            ax.scatter(
+                [x for x, _ in points],
+                [cost for _, cost in points],
+                s=14,
+                color=style["color"],
+                marker=style["marker"],
+                alpha=0.75,
+                linewidths=0,
+            )
+        for x, group in enumerate(groups):
+            median = statistics.median(r.costs["main"] for r in group)
+            ax.hlines(median, x - 0.45, x + 0.45, color="black", lw=0.9)
+        if view == CLAUDE_MATCHED:
+            highlight_widest_task(ax, groups)
+        ax.set_yscale("log")
+        ax.set_ylim(0.021, 1.25)
+        ax.yaxis.set_major_locator(FixedLocator(BLOG_DOLLAR_TICKS))
+        ax.yaxis.set_major_formatter(FuncFormatter(dollars))
+        ax.yaxis.set_minor_formatter(NullFormatter())
+        ax.set_xticks([])
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("50 airline tasks, sorted from cheapest\nto most expensive", fontsize=12)
+        ax.tick_params(axis="y", labelsize=11)
+        ax.grid(axis="y", alpha=0.3)
+    axes[0].set_ylabel("Cost of one run (US$)", fontsize=14)
+    handles = [
+        Line2D(
+            [],
+            [],
+            ls="",
+            color=BLOG_SUCCESS["color"],
+            marker=BLOG_SUCCESS["marker"],
+            label=BLOG_SUCCESS["label"],
+        ),
+        Line2D(
+            [],
+            [],
+            ls="",
+            color=BLOG_FAILED["color"],
+            marker=BLOG_FAILED["marker"],
+            label=BLOG_FAILED["label"],
+        ),
+        Line2D([], [], color="black", lw=0.9, label="Task median"),
+    ]
+    axes[0].legend(handles=handles, loc="upper left", fontsize=10, frameon=False)
+    fig.suptitle("Same task, different bill: 4 runs of each airline task", fontsize=18)
+    fig.supxlabel(BLOG_SOURCE_NOTE, fontsize=7, color="#555555")
+    fig.savefig(path, dpi=DPI, facecolor="white")
+
+
 # --- summary -----------------------------------------------------------------------------
 
 
@@ -714,6 +819,7 @@ def main() -> None:
     fig_spread(runs, OUT_DIR / "fig1.png")
     fig_cps(per_model, OUT_DIR / "fig2.png")
     fig_flip(flips, OUT_DIR / "fig3.png")
+    fig_blog(runs, OUT_DIR / "blog_fig1.png")
     text = summary(spread, failure, per_model, paired, flips)
     (OUT_DIR / "summary.md").write_text(text, encoding="utf-8")
     print(text)
