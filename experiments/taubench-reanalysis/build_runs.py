@@ -94,6 +94,7 @@ COLUMNS = [
     "cost_usd_main",
     "cost_usd_alt",
     "cost_usd_uniform",
+    "cost_usd_alt_uniform",
     "user_cost_usd",
 ]
 
@@ -147,6 +148,8 @@ def run_row(
         "cost_usd_main": f"{cost_of(usage, main).total:.8f}",
         "cost_usd_alt": "" if alt is None else f"{cost_of(usage, alt).total:.8f}",
         "cost_usd_uniform": f"{cost_of(uniform_usage, main).total:.8f}",
+        # Claude has no alternative price, so this equals its cost_usd_main.
+        "cost_usd_alt_uniform": f"{cost_of(uniform_usage, alt or main).total:.8f}",
         "user_cost_usd": "" if user_cost is None else f"{user_cost:.8f}",
     }
 

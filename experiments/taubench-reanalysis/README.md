@@ -76,6 +76,7 @@ One row per run.
 | `cost_usd_main` | **Primary.** Agent cost at the main price, with each model's tool list counted the way its provider documents |
 | `cost_usd_alt` | GPT-4o only: same tokens as `cost_usd_main`, at the alternative snapshot's price |
 | `cost_usd_uniform` | Agent cost at the main price, with **both** models' tool lists counted the same way (JSON text). Use it to compare models |
+| `cost_usd_alt_uniform` | Tool lists counted as in `cost_usd_uniform`, with GPT-4o at the alternative snapshot's price (gpt-4o-2024-08-06). For Claude it equals `cost_usd_main` |
 | `user_cost_usd` | Simulated customer's cost as recorded by tau-bench. GPT-4o only (see below) |
 
 ## Method
@@ -108,20 +109,22 @@ Claude 2,437 (airline) and 2,854 (retail), plus the 346-token hidden prompt.
 ### Two ways of counting the tool list
 
 The tool definitions are sent with every call, so how they are counted shifts every run's
-cost. The study reports two versions:
+cost. The study reports two versions, each at both GPT-4o prices:
 
 | Column | GPT-4o tool list | Claude tool list |
 |---|---|---|
 | `cost_usd_main` | OpenAI cookbook formula (1,120 / 1,875 tokens) | JSON text (2,437 / 2,854 tokens) |
 | `cost_usd_uniform` | JSON text (2,437 / 2,854 tokens) | JSON text (2,437 / 2,854 tokens) |
+| `cost_usd_alt_uniform` | JSON text (2,437 / 2,854 tokens), 2024-08-06 price | JSON text (2,437 / 2,854 tokens) |
 
 - `cost_usd_main` follows each provider's own documentation, so it is the best estimate
   of each model's real cost. Use it for questions **within one model**, such as how cost
   varies across repeats of a task.
 - `cost_usd_uniform` counts the tool list identically for both models, so a difference
   between models cannot come from the counting method. For Claude it equals
-  `cost_usd_main`; only GPT-4o changes. Use it, alongside `cost_usd_main` and
-  `cost_usd_alt`, for questions **between models**.
+  `cost_usd_main`; only GPT-4o changes. `cost_usd_alt_uniform` is the same at the
+  2024-08-06 price. Use them, alongside `cost_usd_main` and `cost_usd_alt`, for
+  questions **between models**.
 
 Everything else is the same in both columns, including Claude's 346-token hidden tool
 prompt, which is a documented real cost rather than a counting choice.
@@ -169,8 +172,8 @@ used. All three prices are verified; see `pricing.yaml`.
    Within-model comparisons (same task across trials) are barely affected, because
    every call of a model gets the same fixed amount. **Cross-model comparisons are
    sensitive to this**, which is why `cost_usd_uniform` exists: findings that compare
-   models should hold under `cost_usd_main`, `cost_usd_alt` and `cost_usd_uniform`
-   before being treated as solid.
+   models should hold under `cost_usd_main`, `cost_usd_alt`, `cost_usd_uniform` and
+   `cost_usd_alt_uniform` before being treated as solid.
 2. **Claude's tokenizer is not public.** `o200k_base` is exact for GPT-4o text and only a
    proxy for Claude.
 3. **Per-message overhead for Claude** uses OpenAI's published values as a proxy;

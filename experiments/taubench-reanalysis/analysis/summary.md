@@ -19,9 +19,10 @@ the costs were estimated and their limitations.
 - **main**: `cost_usd_main`: each provider's documented tool counting; GPT-4o at 2024-05-13 prices
 - **alt**: `cost_usd_alt`: as main, but GPT-4o at 2024-08-06 prices (Claude unchanged)
 - **uniform**: `cost_usd_uniform`: tool list counted the same way (JSON) for both models
+- **alt_uniform**: `cost_usd_alt_uniform`: tool list counted as in uniform, GPT-4o at 2024-08-06 prices
 
 Questions 1 and 2 look within one model and use `main`. Questions 3 and 4 compare models
-and use all three.
+and use all four.
 
 ## 1. How much does cost vary across repeats of the same task?
 
@@ -89,27 +90,27 @@ still varies when the agent completes the same task correctly.
 Total cost of all runs (failed ones included) divided by the number of successes, with
 95% bootstrap confidence intervals (resampling tasks).
 
-| view | domain | main | alt | uniform |
-|---|---|---|---|---|
-| GPT-4o (4 trials) | airline | $0.591 [$0.420, $0.866] | $0.300 [$0.213, $0.439] | $0.783 [$0.563, $1.138] |
-| GPT-4o (4 trials) | retail | $0.544 [$0.465, $0.642] | $0.275 [$0.235, $0.324] | $0.659 [$0.566, $0.776] |
-| GPT-4o (4 trials) | both | $0.555 [$0.483, $0.645] | $0.280 [$0.244, $0.326] | $0.688 [$0.600, $0.798] |
-| Claude (8 trials) | airline | $0.516 [$0.378, $0.714] | $0.516 [$0.378, $0.714] | $0.516 [$0.378, $0.714] |
-| Claude (8 trials) | retail | $0.401 [$0.355, $0.456] | $0.401 [$0.355, $0.456] | $0.401 [$0.355, $0.456] |
-| Claude (8 trials) | both | $0.427 [$0.378, $0.483] | $0.427 [$0.378, $0.483] | $0.427 [$0.378, $0.483] |
-| Claude (first 4 trials) | airline | $0.532 [$0.390, $0.752] | $0.532 [$0.390, $0.752] | $0.532 [$0.390, $0.752] |
-| Claude (first 4 trials) | retail | $0.389 [$0.343, $0.443] | $0.389 [$0.343, $0.443] | $0.389 [$0.343, $0.443] |
-| Claude (first 4 trials) | both | $0.420 [$0.372, $0.481] | $0.420 [$0.372, $0.481] | $0.420 [$0.372, $0.481] |
+| view | domain | main | alt | uniform | alt_uniform |
+|---|---|---|---|---|---|
+| GPT-4o (4 trials) | airline | $0.591 [$0.420, $0.866] | $0.300 [$0.213, $0.439] | $0.783 [$0.563, $1.138] | $0.396 [$0.285, $0.575] |
+| GPT-4o (4 trials) | retail | $0.544 [$0.465, $0.642] | $0.275 [$0.235, $0.324] | $0.659 [$0.566, $0.776] | $0.332 [$0.285, $0.391] |
+| GPT-4o (4 trials) | both | $0.555 [$0.483, $0.645] | $0.280 [$0.244, $0.326] | $0.688 [$0.600, $0.798] | $0.347 [$0.303, $0.402] |
+| Claude (8 trials) | airline | $0.516 [$0.378, $0.714] | $0.516 [$0.378, $0.714] | $0.516 [$0.378, $0.714] | $0.516 [$0.378, $0.714] |
+| Claude (8 trials) | retail | $0.401 [$0.355, $0.456] | $0.401 [$0.355, $0.456] | $0.401 [$0.355, $0.456] | $0.401 [$0.355, $0.456] |
+| Claude (8 trials) | both | $0.427 [$0.378, $0.483] | $0.427 [$0.378, $0.483] | $0.427 [$0.378, $0.483] | $0.427 [$0.378, $0.483] |
+| Claude (first 4 trials) | airline | $0.532 [$0.390, $0.752] | $0.532 [$0.390, $0.752] | $0.532 [$0.390, $0.752] | $0.532 [$0.390, $0.752] |
+| Claude (first 4 trials) | retail | $0.389 [$0.343, $0.443] | $0.389 [$0.343, $0.443] | $0.389 [$0.343, $0.443] | $0.389 [$0.343, $0.443] |
+| Claude (first 4 trials) | both | $0.420 [$0.372, $0.481] | $0.420 [$0.372, $0.481] | $0.420 [$0.372, $0.481] | $0.420 [$0.372, $0.481] |
 
 **Paired comparison:** GPT-4o's cost per success divided by Claude's, on the same tasks
 (GPT-4o's 4 trials vs Claude's first 4), resampling tasks together for both models.
 Below 1.0 means GPT-4o is cheaper per success; above 1.0, Claude.
 
-| domain | main | alt | uniform |
-|---|---|---|---|
-| airline | 1.11 [0.85, 1.44] (includes 1.0) | 0.56 [0.43, 0.73] (excludes 1.0) | 1.47 [1.14, 1.90] (excludes 1.0) |
-| retail | 1.40 [1.26, 1.55] (excludes 1.0) | 0.71 [0.64, 0.78] (excludes 1.0) | 1.70 [1.53, 1.87] (excludes 1.0) |
-| both | 1.32 [1.19, 1.46] (excludes 1.0) | 0.67 [0.60, 0.74] (excludes 1.0) | 1.64 [1.48, 1.80] (excludes 1.0) |
+| domain | main | alt | uniform | alt_uniform |
+|---|---|---|---|---|
+| airline | 1.11 [0.85, 1.44] (includes 1.0) | 0.56 [0.43, 0.73] (excludes 1.0) | 1.47 [1.14, 1.90] (excludes 1.0) | 0.74 [0.58, 0.96] (excludes 1.0) |
+| retail | 1.40 [1.26, 1.55] (excludes 1.0) | 0.71 [0.64, 0.78] (excludes 1.0) | 1.70 [1.53, 1.87] (excludes 1.0) | 0.86 [0.77, 0.94] (excludes 1.0) |
+| both | 1.32 [1.19, 1.46] (excludes 1.0) | 0.67 [0.60, 0.74] (excludes 1.0) | 1.64 [1.48, 1.80] (excludes 1.0) | 0.83 [0.75, 0.91] (excludes 1.0) |
 
 ![Fig 2](fig2.png)
 
@@ -124,12 +125,15 @@ k = 4 is the full data itself, so its flip chance is 0% by definition.
 | airline | main | 1.11 (Claude cheaper) | 25.9% | 15.4% | 3.5% |
 | airline | alt | 0.56 (GPT-4o cheaper) | 0.1% | 0.0% | 0.0% |
 | airline | uniform | 1.47 (Claude cheaper) | 0.9% | 0.0% | 0.0% |
+| airline | alt_uniform | 0.74 (GPT-4o cheaper) | 4.7% | 0.1% | 0.0% |
 | retail | main | 1.40 (Claude cheaper) | 0.0% | 0.0% | 0.0% |
 | retail | alt | 0.71 (GPT-4o cheaper) | 0.0% | 0.0% | 0.0% |
 | retail | uniform | 1.70 (Claude cheaper) | 0.0% | 0.0% | 0.0% |
+| retail | alt_uniform | 0.86 (GPT-4o cheaper) | 0.7% | 0.0% | 0.0% |
 | both | main | 1.32 (Claude cheaper) | 0.0% | 0.0% | 0.0% |
 | both | alt | 0.67 (GPT-4o cheaper) | 0.0% | 0.0% | 0.0% |
 | both | uniform | 1.64 (Claude cheaper) | 0.0% | 0.0% | 0.0% |
+| both | alt_uniform | 0.83 (GPT-4o cheaper) | 0.1% | 0.0% | 0.0% |
 
 - The largest risk is **25.9% at k=1**
   (airline, `main`), where the full-data ratio is
@@ -140,11 +144,11 @@ k = 4 is the full data itself, so its flip chance is 0% by definition.
 
 ![Fig 3](fig3.png)
 
-## What holds under all three cost definitions
+## What holds under all four cost definitions
 
-- airline: cheaper per success is Claude under `main` (CI includes 1.0: not distinguishable), GPT-4o under `alt`, Claude under `uniform`. The conclusion **depends on the assumption**.
-- retail: cheaper per success is Claude under `main`, GPT-4o under `alt`, Claude under `uniform`. The conclusion **depends on the assumption**.
-- both: cheaper per success is Claude under `main`, GPT-4o under `alt`, Claude under `uniform`. The conclusion **depends on the assumption**.
+- airline: cheaper per success is Claude under `main` (CI includes 1.0: not distinguishable), GPT-4o under `alt`, Claude under `uniform`, GPT-4o under `alt_uniform`. The conclusion **depends on the assumption**.
+- retail: cheaper per success is Claude under `main`, GPT-4o under `alt`, Claude under `uniform`, GPT-4o under `alt_uniform`. The conclusion **depends on the assumption**.
+- both: cheaper per success is Claude under `main`, GPT-4o under `alt`, Claude under `uniform`, GPT-4o under `alt_uniform`. The conclusion **depends on the assumption**.
 
 Within-model findings (questions 1 and 2) do not depend on the cost definition in the
 same way: each definition adds a fixed amount per call to every run of a model.

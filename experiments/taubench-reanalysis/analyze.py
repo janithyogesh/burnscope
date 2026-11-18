@@ -47,8 +47,17 @@ COST_DEFINITIONS = {
     ),
     "alt": "`cost_usd_alt`: as main, but GPT-4o at 2024-08-06 prices (Claude unchanged)",
     "uniform": "`cost_usd_uniform`: tool list counted the same way (JSON) for both models",
+    "alt_uniform": (
+        "`cost_usd_alt_uniform`: tool list counted as in uniform, GPT-4o at 2024-08-06 prices"
+    ),
 }
-DEFINITION_COLORS = {"main": "#1f77b4", "alt": "#ff7f0e", "uniform": "#2ca02c"}
+DEFINITION_COLORS = {
+    "main": "#1f77b4",
+    "alt": "#ff7f0e",
+    "uniform": "#2ca02c",
+    "alt_uniform": "#9467bd",
+}
+N_DEFINITIONS = {1: "one", 2: "two", 3: "three", 4: "four"}[len(COST_DEFINITIONS)]
 
 Task = tuple[str, int]  # (domain, task_id)
 
@@ -101,6 +110,7 @@ def load_runs(path: Path = RUNS_CSV) -> list[Run]:
                         "main": main,
                         "alt": float(row["cost_usd_alt"]) if row["cost_usd_alt"] else main,
                         "uniform": float(row["cost_usd_uniform"]),
+                        "alt_uniform": float(row["cost_usd_alt_uniform"]),
                     },
                 )
             )
@@ -538,8 +548,8 @@ def fig_spread(runs: Sequence[Run], path: Path) -> None:
 
 def fig_cps(results: Sequence[CpsResult], path: Path) -> None:
     """Fig 2: cost per successful task with 95% bootstrap intervals."""
-    fig = Figure(figsize=(14, 4.8), layout="constrained")
-    axes = fig.subplots(1, 3, sharey=True)
+    fig = Figure(figsize=(18, 4.8), layout="constrained")
+    axes = fig.subplots(1, len(COST_DEFINITIONS), sharey=True)
     for ax, definition in zip(axes, COST_DEFINITIONS, strict=True):
         for i, view in enumerate(VIEWS):
             points = [
@@ -602,7 +612,7 @@ def fig_flip(results: Sequence[FlipResult], path: Path) -> None:
             ax.text(
                 0.5,
                 0.5,
-                "All three cost definitions:\n0% at every k (lines overlap)",
+                f"All {N_DEFINITIONS} cost definitions:\n0% at every k (lines overlap)",
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
@@ -731,7 +741,7 @@ def fig_blog(runs: Sequence[Run], path: Path) -> None:
 
 
 def robustness_lines(paired: Sequence[PairedResult]) -> list[str]:
-    """Which 'cheaper model' conclusions hold under all three cost definitions."""
+    """Which 'cheaper model' conclusions hold under every cost definition."""
     lines = []
     for domain in ALL_DOMAINS:
         rs = [r for r in paired if r.domain == domain]
@@ -741,7 +751,9 @@ def robustness_lines(paired: Sequence[PairedResult]) -> list[str]:
             for r in rs
         )
         holds = len({r.cheaper for r in rs}) == 1 and not any(r.includes_one for r in rs)
-        verdict = "**holds under all three**" if holds else "**depends on the assumption**"
+        verdict = (
+            f"**holds under all {N_DEFINITIONS}**" if holds else "**depends on the assumption**"
+        )
         lines.append(f"- {domain}: cheaper per success is {parts}. The conclusion {verdict}.")
     return lines
 
@@ -794,7 +806,7 @@ the costs were estimated and their limitations.
 {chr(10).join(f"- **{name}**: {text}" for name, text in COST_DEFINITIONS.items())}
 
 Questions 1 and 2 look within one model and use `main`. Questions 3 and 4 compare models
-and use all three.
+and use all {N_DEFINITIONS}.
 
 ## 1. How much does cost vary across repeats of the same task?
 
@@ -867,7 +879,7 @@ k = 4 is the full data itself, so its flip chance is 0% by definition.
 
 ![Fig 3](fig3.png)
 
-## What holds under all three cost definitions
+## What holds under all {N_DEFINITIONS} cost definitions
 
 {chr(10).join(robustness_lines(paired))}
 
