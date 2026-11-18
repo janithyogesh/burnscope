@@ -619,7 +619,9 @@ def fig_flip(results: Sequence[FlipResult], path: Path) -> None:
 
 BLOG_SOURCE_NOTE = (
     "Data: tau-bench published runs (Sierra Research). Agent cost estimated from transcripts "
-    "at late-2024 list prices.\ngithub.com/janithyogesh/burnscope"
+    "at late-2024 list prices; GPT-4o at the gpt-4o-2024-05-13 rate.\n"
+    "If the newer gpt-4o-2024-08-06 was used, GPT-4o costs would be about half. "
+    "The spread within each task is the same either way. github.com/janithyogesh/burnscope"
 )
 BLOG_DOLLAR_TICKS = [0.025, 0.05, 0.10, 0.25, 0.50, 1.00]
 BLOG_SUCCESS = {"color": "#1f77b4", "marker": "o", "label": "Successful run"}
@@ -662,7 +664,7 @@ def fig_blog(runs: Sequence[Run], path: Path) -> None:
     """Simplified airline version of fig 1 for a general audience (1600 x 900 px)."""
     fig = Figure(figsize=(8, 4.5), layout="constrained", facecolor="white")
     axes = fig.subplots(1, 2, sharey=True)
-    panels = ((GPT_VIEW, "GPT-4o"), (CLAUDE_MATCHED, "Claude 3.5 Sonnet"))
+    panels = ((GPT_VIEW, "GPT-4o"), (CLAUDE_MATCHED, "Claude 3.5 Sonnet (Oct 2024)"))
     for ax, (view, title) in zip(axes, panels, strict=True):
         groups = sorted(
             by_task(runs, view, "airline").values(),
