@@ -28,6 +28,40 @@ uv run python experiments/taubench-reanalysis/build_runs.py  # writes results/ru
 `download.py` records the commit in `data/SOURCE.json`. No tau-bench code is run: tool
 definitions are read from its source files with Python's `ast` module.
 
+## Reproducibility
+
+| Item | Value |
+|---|---|
+| tau-bench data | commit `59a200c6d575d595120f1cb70fea53cef0632f6b` of `sierra-research/tau-bench` |
+| Tokenizer | `tiktoken` 0.14.0 (`o200k_base`), pinned in `uv.lock` with every other dependency |
+| Python | 3.12.10 |
+| Random seed | `20261117`, for every bootstrap and every flip simulation |
+| Resamples / draws | 2,000 per confidence interval and per flip probability |
+
+Metrics reported by `analyze.py`. They are computed per task on that task's runs, and then
+summarised across tasks:
+
+- **CV (coefficient of variation)** = sample standard deviation of the run costs / their mean.
+- **Max/min ratio** = cost of the costliest run / cost of the cheapest run.
+  The success-only version uses only successful runs, and only tasks with at least 2 successes.
+- **p50 / p90** = 50th / 90th percentile with linear interpolation (numpy's default).
+- **Cost per success** = total cost of all runs, failed ones included / number of successful runs.
+- **Paired ratio** = GPT-4o cost per success / Claude cost per success, over the same tasks.
+  Claude uses its first 4 trials, to match GPT-4o's 4. A ratio below 1 means GPT-4o is cheaper.
+- **95% confidence intervals**: task-level bootstrap. All runs of a task are resampled
+  together, and the interval is the 2.5th–97.5th percentile of the 2,000 resampled values.
+- **Flip probability** = share of 2,000 draws in which the paired ratio, computed from
+  *k* randomly chosen trials per task per model (*k* = 1, 2, 3), lands on the other side
+  of 1 from the full-data ratio. In other words, how often a smaller run would name the
+  other model as cheaper.
+
+To rerun everything after `uv sync` and `download.py` (above):
+
+```bash
+uv run python experiments/taubench-reanalysis/build_runs.py  # results/runs.csv
+uv run python experiments/taubench-reanalysis/analyze.py     # analysis/summary.md and figures
+```
+
 ## Output: `results/runs.csv`
 
 One row per run.
@@ -96,7 +130,7 @@ prompt, which is a documented real cost rather than a counting choice.
 
 | Model | Input | Output | Role | Source |
 |---|---|---|---|---|
-| `gpt-4o-2024-05-13` | 5.00 | 15.00 | GPT-4o main assumption (runs come from the 2024 paper) | [OpenAI pricing, archived 2024-11-15](https://web.archive.org/web/20241115053932/https://openai.com/api/pricing/) |
+| `gpt-4o-2024-05-13` | 5.00 | 15.00 | GPT-4o main column (higher of the two possible prices; see the timing note under Assumptions) | [OpenAI pricing, archived 2024-11-15](https://web.archive.org/web/20241115053932/https://openai.com/api/pricing/) |
 | `gpt-4o-2024-08-06` | 2.50 | 10.00 | GPT-4o sensitivity check | same |
 | `claude-3-5-sonnet-20241022` | 3.00 | 15.00 | Claude | [Anthropic models page, archived 2024-11-13](https://web.archive.org/web/20241113202656/https://docs.anthropic.com/en/docs/about-claude/models) |
 
