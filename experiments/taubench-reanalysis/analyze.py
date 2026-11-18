@@ -13,6 +13,8 @@ Usage:
 """
 
 import csv
+import itertools
+import math
 import random
 import statistics
 from collections import defaultdict
@@ -32,7 +34,8 @@ RUNS_CSV = HERE / "results" / "runs.csv"
 OUT_DIR = HERE / "analysis"
 
 SEED = 20261117
-N_RESAMPLES = 2000
+N_RESAMPLES = 2000  # bootstrap resamples, and random 4-of-8 subsets in the Claude check
+N_FLIP_DRAWS = 20000  # draws per flip simulation (question 4)
 DPI = 200
 GPT = "gpt-4o"
 CLAUDE = "claude-3-5-sonnet-20241022"
@@ -71,6 +74,7 @@ class Run:
     task_id: int
     trial: int
     success: bool
+    n_agent_calls: int
     costs: dict[str, float]  # cost per definition in COST_DEFINITIONS
 
 
@@ -106,6 +110,7 @@ def load_runs(path: Path = RUNS_CSV) -> list[Run]:
                     task_id=int(row["task_id"]),
                     trial=int(row["trial"]),
                     success=row["success"] == "1",
+                    n_agent_calls=int(row["n_agent_calls"]),
                     costs={
                         "main": main,
                         "alt": float(row["cost_usd_alt"]) if row["cost_usd_alt"] else main,
@@ -222,6 +227,8 @@ class Failure:
     n_failed: int
     median_ok: float
     median_failed: float
+    mean_ok: float
+    mean_failed: float
     tasks: int
     within_tasks: int
     within_median: float
@@ -231,7 +238,13 @@ class Failure:
 
     @property
     def overall_ratio(self) -> float:
+        """Median failed-run cost / median successful-run cost, all runs pooled."""
         return self.median_failed / self.median_ok
+
+    @property
+    def overall_mean_ratio(self) -> float:
+        """Mean failed-run cost / mean successful-run cost, all runs pooled."""
+        return self.mean_failed / self.mean_ok
 
 
 def failures(runs: Sequence[Run]) -> list[Failure]:
@@ -256,6 +269,8 @@ def failures(runs: Sequence[Run]) -> list[Failure]:
                     len(failed),
                     statistics.median(ok),
                     statistics.median(failed),
+                    statistics.fmean(ok),
+                    statistics.fmean(failed),
                     len(tasks),
                     len(ratios),
                     statistics.median(ratios),
@@ -339,6 +354,54 @@ def paired_results(runs: Sequence[Run]) -> list[PairedResult]:
     return results
 
 
+@dataclass(frozen=True)
+class SubsetCheck:
+    """Claude's cost per success (main) from all 8 trials vs from 4 of them."""
+
+    domain: str
+    all_trials: float
+    first_four: float
+    random_median: float
+    random_range: tuple[float, float]  # 2.5th and 97.5th percentile
+    ranking_changes: int  # random subsets that flip GPT-4o vs Claude under any definition
+
+
+def subset_checks(runs: Sequence[Run]) -> list[SubsetCheck]:
+    """Does using Claude's first 4 trials (to match GPT-4o) bias the comparison?
+
+    Draws N_RESAMPLES random 4-of-8 subsets per task and compares the resulting cost per
+    success with the all-8 value, and the cheaper model under every cost definition.
+    """
+    results = []
+    for domain in ALL_DOMAINS:
+        claude = list(by_task(runs, CLAUDE_ALL, domain).values())
+        gpt = list(by_task(runs, GPT_VIEW, domain).values())
+        gpt_cps = {d: cps(gpt, d) for d in COST_DEFINITIONS}
+        all_cps = {d: cps(claude, d) for d in COST_DEFINITIONS}
+        rng = random.Random(SEED)
+        main_values = []
+        changes = 0
+        for _ in range(N_RESAMPLES):
+            sample = [rng.sample(group, MATCHED_TRIALS) for group in claude]
+            values = {d: cps(sample, d) for d in COST_DEFINITIONS}
+            main_values.append(values["main"])
+            changes += any(
+                (gpt_cps[d] < values[d]) != (gpt_cps[d] < all_cps[d]) for d in COST_DEFINITIONS
+            )
+        first = list(by_task(runs, CLAUDE_MATCHED, domain).values())
+        results.append(
+            SubsetCheck(
+                domain,
+                all_cps["main"],
+                cps(first, "main"),
+                percentile(main_values, 0.5),
+                (percentile(main_values, 0.025), percentile(main_values, 0.975)),
+                changes,
+            )
+        )
+    return results
+
+
 # --- question 4: single-run risk ---------------------------------------------------
 
 
@@ -348,25 +411,76 @@ class FlipResult:
     definition: str
     reference_ratio: float
     flip_probability: dict[int, float]  # k -> share of draws that flip the conclusion
+    k1_median: float  # GPT-4o / Claude ratio across the k=1 draws
+    k1_range: tuple[float, float]  # its 2.5th and 97.5th percentile
+
+
+Totals = tuple[float, ...]  # cost under each definition, then the number of successes
+
+
+def subset_totals(group: Sequence[Run], k: int) -> list[Totals]:
+    """Summed costs and successes for every k-run subset of one task's runs."""
+    return [
+        (
+            *(sum(r.costs[d] for r in subset) for d in COST_DEFINITIONS),
+            sum(r.success for r in subset),
+        )
+        for subset in itertools.combinations(group, k)
+    ]
+
+
+def ratio_from_totals(gpt: Totals, claude: Totals, i: int) -> float:
+    """GPT-4o / Claude cost per success for definition index i, from summed totals."""
+    gpt_cps = gpt[i] / gpt[-1] if gpt[-1] else math.inf
+    claude_cps = claude[i] / claude[-1] if claude[-1] else math.inf
+    if math.isinf(claude_cps):
+        return 0.0 if not math.isinf(gpt_cps) else 1.0
+    return gpt_cps / claude_cps
 
 
 def flip_results(runs: Sequence[Run]) -> list[FlipResult]:
-    """How often k random trials per task reverse the full-data 'cheaper model'."""
-    results = []
+    """How often k random trials per task reverse the full-data 'cheaper model'.
+
+    Each draw picks one k-trial subset per task and model, uniformly at random (the same
+    as sampling k trials without replacement), and is scored under every definition.
+    """
+    definitions = list(COST_DEFINITIONS)
+    flips: dict[tuple[str, str], dict[int, float]] = defaultdict(dict)
+    k1_ratios: dict[tuple[str, str], list[float]] = defaultdict(list)
+    references: dict[tuple[str, str], float] = {}
     for domain in ALL_DOMAINS:
         pairs = paired_tasks(runs, domain)
-        for definition in COST_DEFINITIONS:
-            reference = paired_ratio(pairs, definition)
-            rng = random.Random(SEED)
-            probability = {}
-            for k in K_VALUES:
-                flips = 0
-                for _ in range(N_RESAMPLES):
-                    sample = [(rng.sample(g, k), rng.sample(c, k)) for g, c in pairs]
-                    flips += (paired_ratio(sample, definition) > 1) != (reference > 1)
-                probability[k] = flips / N_RESAMPLES
-            results.append(FlipResult(domain, definition, reference, probability))
-    return results
+        for d in definitions:
+            references[(domain, d)] = paired_ratio(pairs, d)
+        rng = random.Random(SEED)
+        for k in K_VALUES:
+            options = [(subset_totals(g, k), subset_totals(c, k)) for g, c in pairs]
+            counts = dict.fromkeys(definitions, 0)
+            for _ in range(N_FLIP_DRAWS):
+                gpt = tuple(map(sum, zip(*(rng.choice(g) for g, _ in options), strict=True)))
+                claude = tuple(map(sum, zip(*(rng.choice(c) for _, c in options), strict=True)))
+                for i, d in enumerate(definitions):
+                    ratio = ratio_from_totals(gpt, claude, i)
+                    counts[d] += (ratio > 1) != (references[(domain, d)] > 1)
+                    if k == 1:
+                        k1_ratios[(domain, d)].append(ratio)
+            for d in definitions:
+                flips[(domain, d)][k] = counts[d] / N_FLIP_DRAWS
+    return [
+        FlipResult(
+            domain,
+            d,
+            references[(domain, d)],
+            flips[(domain, d)],
+            percentile(k1_ratios[(domain, d)], 0.5),
+            (
+                percentile(k1_ratios[(domain, d)], 0.025),
+                percentile(k1_ratios[(domain, d)], 0.975),
+            ),
+        )
+        for domain in ALL_DOMAINS
+        for d in definitions
+    ]
 
 
 # --- tables ---------------------------------------------------------------------------
@@ -428,7 +542,10 @@ def failure_tables(results: Sequence[Failure]) -> tuple[str, str]:
             "failed runs",
             "median cost, successful",
             "median cost, failed",
-            "failed / successful",
+            "failed / successful (medians)",
+            "mean cost, successful",
+            "mean cost, failed",
+            "failed / successful (means)",
         ],
         [
             [
@@ -439,6 +556,9 @@ def failure_tables(results: Sequence[Failure]) -> tuple[str, str]:
                 f"${f.median_ok:.3f}",
                 f"${f.median_failed:.3f}",
                 f"{f.overall_ratio:.2f}x",
+                f"${f.mean_ok:.3f}",
+                f"${f.mean_failed:.3f}",
+                f"{f.overall_mean_ratio:.2f}x",
             ]
             for f in results
         ],
@@ -499,6 +619,7 @@ def flip_table(results: Sequence[FlipResult]) -> str:
             "cost definition",
             "GPT-4o / Claude, all 4 trials",
             *(f"flip chance, k={k}" for k in K_VALUES),
+            "ratio at k=1: median [95% range]",
         ],
         [
             [
@@ -507,6 +628,29 @@ def flip_table(results: Sequence[FlipResult]) -> str:
                 f"{r.reference_ratio:.2f} ({'GPT-4o' if r.reference_ratio < 1 else 'Claude'} "
                 "cheaper)",
                 *(f"{r.flip_probability[k]:.1%}" for k in K_VALUES),
+                f"{r.k1_median:.2f} [{r.k1_range[0]:.2f}, {r.k1_range[1]:.2f}]",
+            ]
+            for r in results
+        ],
+    )
+
+
+def subset_table(results: Sequence[SubsetCheck]) -> str:
+    return table(
+        [
+            "domain",
+            "Claude, all 8 trials",
+            "Claude, first 4",
+            "Claude, random 4 of 8: median [95% range]",
+            "subsets that change the cheaper model",
+        ],
+        [
+            [
+                r.domain,
+                f"${r.all_trials:.3f}",
+                f"${r.first_four:.3f}",
+                f"${r.random_median:.3f} [${r.random_range[0]:.3f}, ${r.random_range[1]:.3f}]",
+                f"{r.ranking_changes:,} of {N_RESAMPLES:,}",
             ]
             for r in results
         ],
@@ -620,7 +764,7 @@ def fig_flip(results: Sequence[FlipResult], path: Path) -> None:
     axes[0].set_ylabel("Chance of naming the wrong cheaper model (%)")
     axes[0].legend(loc="upper right")
     fig.suptitle(
-        "Comparing GPT-4o and Claude on fewer trials per task (2,000 random draws)",
+        f"Comparing GPT-4o and Claude on fewer trials per task ({N_FLIP_DRAWS:,} random draws)",
         x=0.02,
         ha="left",
     )
@@ -651,21 +795,25 @@ def highlight_widest_task(ax: Axes, groups: Sequence[Sequence[Run]]) -> None:
     """
     ratios = [success_ratio(group) or 0.0 for group in groups]
     x = max(range(len(groups)), key=ratios.__getitem__)
-    costs = [r.costs["main"] for r in groups[x] if r.success]
-    low, high = min(costs), max(costs)
+    succeeded = sorted((r for r in groups[x] if r.success), key=lambda r: r.costs["main"])
+    cheapest, costliest = succeeded[0], succeeded[-1]
+    low, high = cheapest.costs["main"], costliest.costs["main"]
     ax.vlines(x, low, high, color="#444444", lw=0.8, ls="--", zorder=0)
     # Put the label on the emptier side: upper left if the task is on the right.
     on_right = x > len(groups) / 2
     ax.annotate(
-        f"Same task, both runs succeeded:\n{ratios[x]:.1f}x apart",
+        # "\$" keeps matplotlib from reading the two dollar signs as a math formula.
+        f"Task {cheapest.task_id}: \\${low:.2f} vs \\${high:.2f} "
+        f"({cheapest.n_agent_calls} vs {costliest.n_agent_calls} calls),\n"
+        f"both succeeded: {ratios[x]:.1f}x",
         xy=(x, (low * high) ** 0.5),  # middle of the line on a log scale
         xytext=(0.04, 0.95) if on_right else (0.96, 0.05),
         textcoords="axes fraction",
         ha="left" if on_right else "right",
         va="top" if on_right else "bottom",
         multialignment="left",
-        fontsize=10,
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#999999"},
+        fontsize=8.5,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "#999999"},
         arrowprops={"arrowstyle": "->", "color": "#444444", "lw": 1},
     )
 
@@ -708,10 +856,10 @@ def fig_blog(runs: Sequence[Run], path: Path) -> None:
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks([])
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("50 airline tasks, sorted from cheapest\nto most expensive", fontsize=12)
+        ax.set_xlabel("50 airline tasks, sorted by\nmedian cost per run", fontsize=12)
         ax.tick_params(axis="y", labelsize=11)
         ax.grid(axis="y", alpha=0.3)
-    axes[0].set_ylabel("Cost of one run (US$)", fontsize=14)
+    axes[0].set_ylabel("Cost of one run (US$, log scale)", fontsize=13)
     handles = [
         Line2D(
             [],
@@ -764,12 +912,31 @@ def summary(
     failure: Sequence[Failure],
     per_model: Sequence[CpsResult],
     paired: Sequence[PairedResult],
+    subsets: Sequence[SubsetCheck],
     flips: Sequence[FlipResult],
 ) -> str:
     matched = [s for s in spread if s.view in (GPT_VIEW, CLAUDE_MATCHED)]
     worst = max(spread, key=lambda s: s.ratio_worst)
     overall_ratios = [f.overall_ratio for f in failure]
     within_medians = [f.within_median for f in failure]
+    mean_ratios = [f.overall_mean_ratio for f in failure]
+    changes = "; ".join(
+        f"{c.domain}: "
+        + (
+            "none"
+            if c.ranking_changes == 0
+            else f"{c.ranking_changes:,} of {N_RESAMPLES:,} ({c.ranking_changes / N_RESAMPLES:.1%})"
+        )
+        for c in subsets
+    )
+    first_inside = all(c.random_range[0] <= c.first_four <= c.random_range[1] for c in subsets)
+    subset_line = f"- Random 4-of-8 picks that change the cheaper model: {changes}.\n" + (
+        "- Claude's first-4 value is inside the random-4 95% range in every domain, so"
+        " using the first 4 trials is not an unusual pick."
+        if first_inside
+        else "- Claude's first-4 value falls outside the random-4 95% range in at least"
+        " one domain, so the choice of trials matters there."
+    )
     biggest_flip = max(flips, key=lambda r: r.flip_probability[1])
     overall_tables = failure_tables(failure)
     cv_by = {(s.view, s.domain): s.cv_p50 for s in spread}
@@ -788,8 +955,9 @@ def summary(
     return f"""# tau-bench re-analysis: results
 
 Generated by `analyze.py` from `results/runs.csv`. Random seed {SEED}, {N_RESAMPLES:,}
-bootstrap resamples and {N_RESAMPLES:,} draws per simulation. See `../README.md` for how
-the costs were estimated and their limitations.
+bootstrap resamples, {N_RESAMPLES:,} random subsets in the Claude 4-of-8 check and
+{N_FLIP_DRAWS:,} draws per flip simulation. See `../README.md` for how the costs were
+estimated and their limitations.
 
 ## Two ideas used below
 
@@ -834,6 +1002,15 @@ still varies when the agent completes the same task correctly.
 
 ## 2. Do failed runs cost more than successful ones?
 
+Both headline ratios use medians, so a few very long runs cannot dominate them:
+
+- **Pooled:** median cost of a failed run / median cost of a successful run, all runs
+  of a model and domain together.
+- **Within the same task:** for each task, median failed-run cost / median
+  successful-run cost; then the median of those ratios across tasks.
+
+The pooled ratio of means is shown alongside for comparison.
+
 **Overall** (all runs pooled):
 
 {overall_tables[0]}
@@ -843,7 +1020,8 @@ still varies when the agent completes the same task correctly.
 {overall_tables[1]}
 
 - Pooled, failed runs cost **{min(overall_ratios):.2f}x to {max(overall_ratios):.2f}x**
-  as much as successful ones.
+  as much as successful ones (medians), or
+  **{min(mean_ratios):.2f}x to {max(mean_ratios):.2f}x** using means.
 - Within the same task, the median ratio is only
   **{min(within_medians):.2f}x to {max(within_medians):.2f}x**. {gap_line}
 
@@ -860,13 +1038,25 @@ Below 1.0 means GPT-4o is cheaper per success; above 1.0, Claude.
 
 {paired_table(paired)}
 
+**Sensitivity check: which 4 Claude trials?** The paired comparison uses Claude's first 4
+trials to match GPT-4o's 4. Here Claude's cost per success (`main`) is computed from all
+8 trials, from the first 4, and from {N_RESAMPLES:,} random picks of 4 of the 8 trials per
+task. The last column counts random picks that would change the cheaper model (GPT-4o's
+all-trials cost per success vs Claude's) under any of the {N_DEFINITIONS} cost definitions.
+
+{subset_table(subsets)}
+
+{subset_line}
+
 ![Fig 2](fig2.png)
 
 ## 4. How often does comparing on fewer trials pick the wrong cheaper model?
 
-For k trials per task (picked at random, without replacement, 2,000 times), how often
-does the GPT-4o vs Claude comparison reach the opposite conclusion from all 4 trials?
-k = 4 is the full data itself, so its flip chance is 0% by definition.
+For k trials per task (picked at random, without replacement, {N_FLIP_DRAWS:,} times), how
+often does the GPT-4o vs Claude comparison reach the opposite conclusion from all 4
+trials? k = 4 is the full data itself, so its flip chance is 0% by definition. The last
+column shows how widely the GPT-4o / Claude cost-per-success ratio itself moves when
+each task contributes only one trial per model (median and the middle 95% of draws).
 
 {flip_table(flips)}
 
@@ -901,7 +1091,9 @@ def main() -> None:
     fig_cps(per_model, OUT_DIR / "fig2.png")
     fig_flip(flips, OUT_DIR / "fig3.png")
     fig_blog(runs, OUT_DIR / "blog_fig1.png")
-    text = summary(spread, success_spreads(runs), failure, per_model, paired, flips)
+    text = summary(
+        spread, success_spreads(runs), failure, per_model, paired, subset_checks(runs), flips
+    )
     (OUT_DIR / "summary.md").write_text(text, encoding="utf-8")
     print(text)
 

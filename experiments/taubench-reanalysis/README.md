@@ -35,8 +35,8 @@ definitions are read from its source files with Python's `ast` module.
 | tau-bench data | commit `59a200c6d575d595120f1cb70fea53cef0632f6b` of `sierra-research/tau-bench` |
 | Tokenizer | `tiktoken` 0.14.0 (`o200k_base`), pinned in `uv.lock` with every other dependency |
 | Python | 3.12.10 |
-| Random seed | `20261117`, for every bootstrap and every flip simulation |
-| Resamples / draws | 2,000 per confidence interval and per flip probability |
+| Random seed | `20261117`, for every bootstrap, the Claude 4-of-8 check and every flip simulation |
+| Resamples / draws | 2,000 per confidence interval; 2,000 random subsets in the Claude 4-of-8 check; 20,000 per flip simulation |
 
 Metrics reported by `analyze.py`. They are computed per task on that task's runs, and then
 summarised across tasks:
@@ -50,10 +50,18 @@ summarised across tasks:
   Claude uses its first 4 trials, to match GPT-4o's 4. A ratio below 1 means GPT-4o is cheaper.
 - **95% confidence intervals**: task-level bootstrap. All runs of a task are resampled
   together, and the interval is the 2.5th–97.5th percentile of the 2,000 resampled values.
-- **Flip probability** = share of 2,000 draws in which the paired ratio, computed from
+- **Failed / successful cost ratio** (question 2) = median failed-run cost / median
+  successful-run cost. Pooled: over all runs of a model and domain. Within the same task:
+  per task, then the median across tasks. The pooled ratio of means is also reported.
+- **Claude 4-of-8 check** = Claude's cost per success from all 8 trials, from the first 4,
+  and from 2,000 draws of 4 random trials per task (2.5th–97.5th percentile reported),
+  plus the number of draws in which GPT-4o vs Claude's cheaper model changes under any
+  cost definition.
+- **Flip probability** = share of 20,000 draws in which the paired ratio, computed from
   *k* randomly chosen trials per task per model (*k* = 1, 2, 3), lands on the other side
   of 1 from the full-data ratio. In other words, how often a smaller run would name the
-  other model as cheaper.
+  other model as cheaper. For *k* = 1 the median and 2.5th–97.5th percentile of the
+  ratio across draws are also reported.
 
 To rerun everything after `uv sync` and `download.py` (above):
 
@@ -61,6 +69,19 @@ To rerun everything after `uv sync` and `download.py` (above):
 uv run python experiments/taubench-reanalysis/build_runs.py  # results/runs.csv
 uv run python experiments/taubench-reanalysis/analyze.py     # analysis/summary.md and figures
 ```
+
+## Attribution
+
+The run transcripts, task definitions and tool definitions used here come from
+[tau-bench](https://github.com/sierra-research/tau-bench), Copyright (c) 2024 Sierra,
+released under the MIT License. They are downloaded by `download.py` and are not
+redistributed in this repository.
+
+The benchmark is described in:
+
+> Shunyu Yao, Noah Shinn, Pedram Razavi and Karthik Narasimhan.
+> *τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains.*
+> arXiv:2406.12045, 2024. https://arxiv.org/abs/2406.12045
 
 ## Output: `results/runs.csv`
 
